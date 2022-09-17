@@ -200,6 +200,9 @@ class CDNCNCNode(CDNProgram):
         # Now just going to upload to all alive nodes
         upload_to_nodes = []
         nodes = cnc_node.db.collection(u'nodes').stream()
+        nodes = [node for node in nodes]
+        total_nodes = len(nodes)
+        minimum_nodes_wanted = math.ceil(total_nodes * FILE_REDUNDANCY_THRESHOLD) + 1
         for node in nodes:
             # if node was alive within last minute
             if get_elapsed(node.get("last_heartbeat_time")) <= 60:
@@ -208,6 +211,10 @@ class CDNCNCNode(CDNProgram):
                     "hostname": node.get("hostname"),
                     "port": node.get("port")
                 })
+
+            # If we have enough nodes to reach threshold, then don't add anymore nodes to upload to
+            if len(upload_to_nodes) >= minimum_nodes_wanted:
+                break
 
         file_id = doc_ref[1].id
 
