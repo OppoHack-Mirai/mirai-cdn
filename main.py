@@ -207,6 +207,7 @@ class CDNCNCNode(CDNProgram):
         upload_to_nodes = []
         nodes = cnc_node.db.collection(u'nodes').stream()
         nodes = [node for node in nodes]
+        random.shuffle(nodes)
         total_nodes = len(nodes)
         minimum_nodes_wanted = math.ceil(total_nodes * FILE_REDUNDANCY_THRESHOLD) + 1
         for node in nodes:
