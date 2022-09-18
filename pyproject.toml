@@ -12,6 +12,7 @@ Flask = "^2.2.2"
 Werkzeug = "^2.2.2"
 requests = "^2.28.1"
 ipinfo = "^4.3.1"
+Flask-Cors = "^3.0.10"
 
 
 [build-system]

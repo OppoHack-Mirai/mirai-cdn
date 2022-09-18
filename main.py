@@ -15,9 +15,11 @@ import ipinfo
 import requests
 from firebase_admin import credentials
 from firebase_admin import firestore
-from flask import Flask, request, jsonify, abort, redirect, send_file
+from flask import Flask, request, jsonify, abort, redirect, send_file, send_from_directory
 from google.cloud.firestore_v1 import ArrayUnion
 from requests import HTTPError
+
+from flask_cors import CORS
 
 
 class CDNProgram:
@@ -27,6 +29,7 @@ class CDNProgram:
 
 
 flask_app = Flask("Mirai")
+CORS(flask_app)
 cnc_node = None  # type: Optional[CDNCNCNode]
 
 
@@ -62,10 +65,11 @@ class CDNCNCNode(CDNProgram):
         self.db = None
         cnc_node = self
 
-        if len(sys.argv) < 3:
-            print("Please provide ip info token as second argument")
+        if len(sys.argv) < 4:
+            print("Please provide ip info token and port as second and third argument")
             exit(1)
         ip_info_token = sys.argv[2]
+        self.port = int(sys.argv[3])
         self.ip_info = ipinfo.getHandler(ip_info_token)
 
     def start(self):
@@ -83,7 +87,7 @@ class CDNCNCNode(CDNProgram):
         daemon.start()
 
         print("Command node started.")
-        flask_app.run(host='0.0.0.0', port=9981)
+        flask_app.run(host='0.0.0.0', port=self.port)
 
     def heartbeat_periodic(self):
         while True:
@@ -189,15 +193,17 @@ class CDNCNCNode(CDNProgram):
         real_name = request.form.get("real_name")
         file_size = request.form.get("size_bits")
         file_hash = request.form.get("hash")
+        time_created = request.form.get("time_created")
 
         doc_ref = cnc_node.db.collection(u'files').add({
             "real_name": real_name,
             "size_bits": int(file_size),
-            "hash": file_hash
+            "hash": file_hash,
+            "time_created": time_created
         })
 
         # TODO : Improve algorithm
-        # Now just going to upload to all alive nodes
+        # Now just going to upload to most of alive nodes
         upload_to_nodes = []
         nodes = cnc_node.db.collection(u'nodes').stream()
         nodes = [node for node in nodes]
@@ -356,7 +362,6 @@ class CDNCNCNode(CDNProgram):
 
 
 end_node = None  # type: Optional[CDNEndNode]
-cnc_url = "http://localhost:9981/"
 
 
 # End node server (serves files)
@@ -366,13 +371,15 @@ class CDNEndNode(CDNProgram):
         end_node = self
         self.port = None
         self.node_id = None
+        self.cnc_url = None
 
     def start(self):
-        if len(sys.argv) < 4:
-            print("Please specify port and node token as second and third argument")
+        if len(sys.argv) < 5:
+            print("Please specify port, node token, and cnc url as second and third and fourth argument")
             exit(1)
         self.port = int(sys.argv[2])
         self.node_id = sys.argv[3]
+        self.cnc_url = sys.argv[4]
 
         if not os.path.exists("node_files"):
             os.mkdir("node_files")
@@ -390,7 +397,6 @@ class CDNEndNode(CDNProgram):
         real_name, size_bits, file_hash = get_file_info(file_id)
         if not real_name:
             return
-
         # save the file locally
         local_directory = "node_files/" + file_id + "/"
         local_file_path = local_directory + real_name
@@ -398,30 +404,26 @@ class CDNEndNode(CDNProgram):
             print('File already exists')
             abort(500)
             return
-
         if not os.path.exists(local_directory):
             os.mkdir(local_directory)
 
         f = request.files['file']
         bytes = f.read()
         uploaded_file_hash = hashlib.sha256(bytes).hexdigest()
-
         if uploaded_file_hash != file_hash:
             print('File hash is invalid, it is ' + uploaded_file_hash)
             abort(500)
             return jsonify({
                 "error": "Invalid file contents, based on hash."
             })
-
         file = open(local_file_path, 'wb')
         file.write(bytes)
         file.close()
-
         # Tell the cnc server we host a new file
-        requests.post(cnc_url + "/notify_received_file/" + end_node.node_id, {
+        requests.post(end_node.cnc_url + "/notify_received_file/" + end_node.node_id, {
             "file_id": file_id
         })
-
+        print('7')
         return jsonify({
             "message": "Success"
         })
@@ -433,12 +435,17 @@ class CDNEndNode(CDNProgram):
         if not real_name:
             return
 
-        local_file_path = "node_files/" + file_id + "/" + real_name
+        local_directory = "node_files/" + file_id + "/"
+        local_file_path = local_directory + real_name
         if not os.path.exists(local_file_path):
             abort(500)
             return
 
-        return send_file(local_file_path, as_attachment=True)
+        # Serve HTML
+        if real_name.endswith(".html"):
+            return send_from_directory(local_directory, real_name)
+
+        return send_file(local_file_path, as_attachment=False)
 
     @flask_app.route("/delete_node_file/<file_id>", methods=['POST'])
     def delete_node_file(file_id: str):
@@ -488,9 +495,9 @@ class CDNEndNode(CDNProgram):
 
 
 def get_file_info(file_id):
-    global cnc_url
+    global end_node
     try:
-        response = requests.get(cnc_url + "file_info/" + file_id)
+        response = requests.get(end_node.cnc_url + "file_info/" + file_id)
         response.raise_for_status()
         json = response.json()
     except HTTPError:
