@@ -92,12 +92,12 @@ class CDNCNCNode(CDNProgram):
     def heartbeat_periodic(self):
         while True:
             self.check_node_heartbeats()
-            time.sleep(10)
+            time.sleep(300)
 
     def file_health_periodic(self):
         while True:
             self.check_file_health()
-            time.sleep(60)
+            time.sleep(120)
 
     # Check heartbeats for each node
     def check_node_heartbeats(self):
@@ -211,8 +211,8 @@ class CDNCNCNode(CDNProgram):
         total_nodes = len(nodes)
         minimum_nodes_wanted = math.ceil(total_nodes * FILE_REDUNDANCY_THRESHOLD) + 1
         for node in nodes:
-            # if node was alive within last minute
-            if get_elapsed(node.get("last_heartbeat_time")) <= 60:
+            # if node was alive within last five minutes
+            if get_elapsed(node.get("last_heartbeat_time")) <= 315:
                 upload_to_nodes.append({
                     "protocol": node.get("protocol"),
                     "hostname": node.get("hostname"),
